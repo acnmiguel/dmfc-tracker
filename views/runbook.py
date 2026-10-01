@@ -282,7 +282,20 @@ def render_runbook(db, user):
         })
 
     df = pd.DataFrame(rows)
-    st.dataframe(df, use_container_width=True, hide_index=True)
+
+    status_colors = {
+        "DONE":    "background-color:#C8E6C9;color:#1B5E20",
+        "RUNNING": "background-color:#FFF9C4;color:#F57F17",
+        "BLOCKED": "background-color:#FFCDD2;color:#B71C1C",
+        "WAITING": "background-color:#FFE0B2;color:#E65100",
+        "READY":   "background-color:#BBDEFB;color:#0D47A1",
+    }
+
+    def _color_status(series):
+        return [status_colors.get(v, "") for v in series]
+
+    styled = df.style.apply(_color_status, subset=["Status"])
+    st.dataframe(styled, use_container_width=True, hide_index=True)
 
     # ── Critical path ──────────────────────────────────────────────────────────
     st.markdown(f"### 🔥 Critical Path — {cp_total} mins estimated")

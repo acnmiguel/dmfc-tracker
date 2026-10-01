@@ -12,8 +12,14 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
-def get_steps_for(db, obj_id):
-    return db.get_steps(obj_id)
+def _shown_steps(obj_id):
+    has_ext    = obj_id in EXT_NUM_OBJECTS
+    has_prereq = obj_id in PREREQ_OBJECTS
+    return [
+        s for s in STEP_DEFS
+        if not (s["key"] in ("EXT_NUM", "EXT_REVERT") and not has_ext)
+        and not (s["key"] == "PREREQ" and not has_prereq)
+    ]
 
 
 def render_mfg(db, user):
@@ -30,11 +36,9 @@ def render_mfg(db, user):
     with col4:
         search = st.text_input("Search object", placeholder="name or DM-ID")
 
-    # Load live status for all objects once
     all_status = db.get_all_status()
     active_blockers = db.get_blockers()
 
-    # Filter
     objs = OBJECTS
     if mod_filter:
         objs = [o for o in objs if o["module"] in mod_filter]
@@ -58,25 +62,34 @@ def render_mfg(db, user):
         oid = obj["id"]
         db_status = all_status.get(oid, {})
         obj_status = db_status.get("status", "Not Started")
-        steps = get_steps_for(db, oid)
+        steps = db.get_steps(oid)
         blocked = oid in active_blockers
+        shown = _shown_steps(oid)
+        done_count = sum(1 for s in shown if steps.get(s["key"], {}).get("status") == "done")
 
-        # Header color by status
         status_icon = {"Not Started": "⬜", "In Progress": "🟡", "Completed": "✅"}.get(obj_status, "⬜")
-        block_icon = "🚨 " if blocked else ""
+        block_icon  = "🚨 " if blocked else ""
+        progress_label = f" [{done_count}/{len(shown)}]"
 
         with st.expander(
-            f"{block_icon}{status_icon} **{oid}** — {obj['name']}  "
+            f"{block_icon}{status_icon} **{oid}** — {obj['name']}{progress_label}  "
             f"| {obj['module']} · {obj['wave']} · {obj['tool']}",
             expanded=False,
         ):
-            _render_object_detail(db, user, obj, db_status, steps, active_blockers, blocked)
+            _render_object_detail(db, user, obj, db_status, steps, active_blockers, blocked, shown)
 
 
-def _render_object_detail(db, user, obj, db_status, steps, active_blockers, blocked):
+def _render_object_detail(db, user, obj, db_status, steps, active_blockers, blocked, shown_steps):
     oid = obj["id"]
     m1 = MOCK1_RESULTS.get(oid, {})
     actions = MOCK2_ACTIONS.get(oid, [])
+
+    # ── Progress bar ───────────────────────────────────────────────────────────
+    done_count = sum(1 for s in shown_steps if steps.get(s["key"], {}).get("status") == "done")
+    st.progress(
+        done_count / len(shown_steps) if shown_steps else 0.0,
+        text=f"{done_count}/{len(shown_steps)} steps completed",
+    )
 
     # ── Top info row ───────────────────────────────────────────────────────────
     col1, col2, col3 = st.columns(3)
@@ -117,7 +130,7 @@ def _render_object_detail(db, user, obj, db_status, steps, active_blockers, bloc
 
     st.markdown("---")
 
-    # ── Status + M1 results update ─────────────────────────────────────────────
+    # ── Status + M2 results ────────────────────────────────────────────────────
     col_s, col_l, col_e, col_notes = st.columns([2, 2, 2, 4])
     with col_s:
         new_status = st.selectbox(
@@ -130,26 +143,17 @@ def _render_object_detail(db, user, obj, db_status, steps, active_blockers, bloc
         )
     with col_l:
         new_loaded = st.number_input(
-            "M2 Records Loaded",
-            min_value=0,
-            value=int(db_status.get("m1_loaded") or 0),
-            step=1,
-            key=f"loaded_{oid}",
+            "M2 Records Loaded", min_value=0,
+            value=int(db_status.get("m1_loaded") or 0), step=1, key=f"loaded_{oid}",
         )
     with col_e:
         new_errors = st.number_input(
-            "M2 Errors",
-            min_value=0,
-            value=int(db_status.get("m1_errors") or 0),
-            step=1,
-            key=f"errors_{oid}",
+            "M2 Errors", min_value=0,
+            value=int(db_status.get("m1_errors") or 0), step=1, key=f"errors_{oid}",
         )
     with col_notes:
         new_notes = st.text_area(
-            "Notes",
-            value=db_status.get("notes", ""),
-            height=68,
-            key=f"notes_{oid}",
+            "Notes", value=db_status.get("notes", ""), height=68, key=f"notes_{oid}",
         )
 
     if st.button("💾 Save", key=f"save_{oid}"):
@@ -183,9 +187,7 @@ def _render_object_detail(db, user, obj, db_status, steps, active_blockers, bloc
         with st.expander("⚠️ Raise a blocker for this object", expanded=False):
             blk_reason = st.text_input("Reason", key=f"blk_reason_{oid}")
             blk_owner = st.text_input(
-                "Owner / Escalate to",
-                value=_default_owner(oid),
-                key=f"blk_owner_{oid}",
+                "Owner / Escalate to", value=_default_owner(oid), key=f"blk_owner_{oid}",
             )
             if st.button("🚨 Raise Blocker", key=f"raise_blk_{oid}"):
                 if blk_reason:
@@ -196,36 +198,22 @@ def _render_object_detail(db, user, obj, db_status, steps, active_blockers, bloc
 
     # ── Step checklist ─────────────────────────────────────────────────────────
     st.markdown("#### Execution Checklist")
-    has_ext = oid in EXT_NUM_OBJECTS
-    has_prereq = oid in PREREQ_OBJECTS
-    shown_steps = [
-        s for s in STEP_DEFS
-        if not (s["key"] in ("EXT_NUM", "EXT_REVERT") and not has_ext)
-        and not (s["key"] == "PREREQ" and not has_prereq)
-    ]
-
-    done_count = sum(
-        1 for s in shown_steps
-        if steps.get(s["key"], {}).get("status") == "done"
-    )
     st.caption(f"{done_count}/{len(shown_steps)} steps completed")
 
     for si, step in enumerate(shown_steps):
         sk = step["key"]
         sr = steps.get(sk, {})
-        status = sr.get("status", "pending")
+        status  = sr.get("status", "pending")
         started = sr.get("started_at")
-        ended = sr.get("ended_at")
-        note = sr.get("note", "")
-        color = step["color"]
+        ended   = sr.get("ended_at")
+        note    = sr.get("note", "")
+        color   = step["color"]
 
-        is_done = status == "done"
+        is_done    = status == "done"
         is_running = status == "running"
 
-        # Build label
         label_parts = [f"**{si+1}. {step['label']}**"]
         if is_done and started and ended:
-            from data import STEP_DEFS as _  # just to keep imports clean
             try:
                 s_dt = datetime.fromisoformat(started.replace("Z", "+00:00"))
                 e_dt = datetime.fromisoformat(ended.replace("Z", "+00:00"))
@@ -241,13 +229,13 @@ def _render_object_detail(db, user, obj, db_status, steps, active_blockers, bloc
             except Exception:
                 pass
 
-        bg = "#F1F8F1" if is_done else "#FFF8E1" if is_running else "#fafafa"
+        bg     = "#F1F8F1" if is_done else "#FFF8E1" if is_running else "#fafafa"
         border = "#A5D6A7" if is_done else "#FFB300" if is_running else "#e0e0e0"
 
         st.markdown(
             f'<div style="background:{bg};border:1px solid {border};'
             f'border-left:4px solid {color};padding:8px 12px;border-radius:4px;margin-bottom:6px">'
-            f"{''.join(label_parts)}"
+            f"{'  '.join(label_parts)}"
             f"</div>",
             unsafe_allow_html=True,
         )
@@ -256,11 +244,11 @@ def _render_object_detail(db, user, obj, db_status, steps, active_blockers, bloc
         with btn_cols[0]:
             if not is_done and not is_running:
                 if st.button("▶ Start", key=f"start_{oid}_{sk}"):
-                    _start_step(db, oid, sk, user["name"])
+                    _start_step(db, oid, sk, user["name"], db_status.get("status", "Not Started"))
                     st.rerun()
             elif is_running:
                 if st.button("■ Stop", key=f"stop_{oid}_{sk}"):
-                    _stop_step(db, oid, sk, user["name"], steps)
+                    _stop_step(db, oid, sk, user["name"], steps, shown_steps)
                     st.rerun()
         with btn_cols[1]:
             if is_done or is_running:
@@ -269,22 +257,17 @@ def _render_object_detail(db, user, obj, db_status, steps, active_blockers, bloc
                     st.rerun()
         with btn_cols[3]:
             new_note = st.text_input(
-                "Note",
-                value=note,
-                label_visibility="collapsed",
-                placeholder="Add note…",
-                key=f"note_{oid}_{sk}",
+                "Note", value=note, label_visibility="collapsed",
+                placeholder="Add note…", key=f"note_{oid}_{sk}",
             )
             if new_note != note:
                 db.upsert_step(oid, sk, {
-                    "status": status,
-                    "started_at": started,
-                    "ended_at": ended,
-                    "note": new_note,
+                    "status": status, "started_at": started,
+                    "ended_at": ended, "note": new_note,
                 }, user["name"])
 
 
-def _start_step(db, obj_id, step_key, user_name):
+def _start_step(db, obj_id, step_key, user_name, current_obj_status):
     db.upsert_step(obj_id, step_key, {
         "status": "running",
         "started_at": now_iso(),
@@ -292,9 +275,16 @@ def _start_step(db, obj_id, step_key, user_name):
         "note": "",
     }, user_name)
     db.log(obj_id, "step_start", step_key, user_name)
+    if current_obj_status == "Not Started":
+        db.upsert_status(obj_id, {
+            "status": "In Progress",
+            "updated_by": user_name,
+            "updated_at": now_iso(),
+        })
+        db.log(obj_id, "status_auto", "auto→In Progress", user_name)
 
 
-def _stop_step(db, obj_id, step_key, user_name, steps):
+def _stop_step(db, obj_id, step_key, user_name, steps, shown_steps):
     sr = steps.get(step_key, {})
     db.upsert_step(obj_id, step_key, {
         "status": "done",
@@ -303,14 +293,19 @@ def _stop_step(db, obj_id, step_key, user_name, steps):
         "note": sr.get("note", ""),
     }, user_name)
     db.log(obj_id, "step_done", step_key, user_name)
+    updated = {**steps, step_key: {"status": "done"}}
+    if shown_steps and all(updated.get(s["key"], {}).get("status") == "done" for s in shown_steps):
+        db.upsert_status(obj_id, {
+            "status": "Completed",
+            "updated_by": user_name,
+            "updated_at": now_iso(),
+        })
+        db.log(obj_id, "status_auto", "auto→Completed (all steps done)", user_name)
 
 
 def _reset_step(db, obj_id, step_key, user_name):
     db.upsert_step(obj_id, step_key, {
-        "status": "pending",
-        "started_at": None,
-        "ended_at": None,
-        "note": "",
+        "status": "pending", "started_at": None, "ended_at": None, "note": "",
     }, user_name)
     db.log(obj_id, "step_reset", step_key, user_name)
 
