@@ -77,7 +77,7 @@ def render_schedule(db, user):
                 val = sr.get(field)
                 if val:
                     try:
-                        t = datetime.fromisoformat(val.replace("Z", "+00:00"))
+                        t = datetime.fromisoformat(val.replace("Z", "+00:00")).replace(tzinfo=None)
                         if field == "started_at":
                             if actual_start is None or t < actual_start:
                                 actual_start = t
@@ -90,7 +90,7 @@ def render_schedule(db, user):
                 has_running = True
 
         if actual_start:
-            end = actual_end if actual_end else datetime.now(timezone.utc)
+            end = actual_end if actual_end else datetime.utcnow()
             gantt_rows.append({
                 "ID": oid,
                 "Name": obj["name"],
