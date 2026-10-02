@@ -100,6 +100,13 @@ st.caption(
 )
 st.markdown("---")
 
+# ── Cutover Gantt — always visible above tabs ──────────────────────────────────
+with st.expander("📊 Cutover Schedule — Miguel & Alyssa", expanded=True):
+    from views.gantt import render_gantt
+    render_gantt(db)
+
+st.markdown("---")
+
 # ── Tabs ───────────────────────────────────────────────────────────────────────
 tabs = st.tabs(["📋 MFG Workstream", "🚨 Cutover Runbook", "📊 Summary", "🗓️ Schedule"])
 
