@@ -123,7 +123,10 @@ def render_runbook(db, user):
     active_blockers = db.get_blockers()
 
     # Fetch all step states in one query
-    all_steps = db.get_all_steps()
+    try:
+        all_steps = db.get_all_steps()
+    except AttributeError:
+        all_steps = {obj["id"]: db.get_steps(obj["id"]) for obj in OBJECTS}
 
     # Compute readiness
     readiness = {}

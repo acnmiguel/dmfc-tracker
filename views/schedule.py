@@ -59,7 +59,10 @@ def render_schedule(db, user):
     st.markdown("### 📊 Load Sequence — Gantt View")
     st.caption("Bars show actual step timing when available, M1 planned schedule otherwise.")
 
-    all_steps = db.get_all_steps()
+    try:
+        all_steps = db.get_all_steps()
+    except AttributeError:
+        all_steps = {obj["id"]: db.get_steps(obj["id"]) for obj in OBJECTS}
     gantt_rows = []
     for obj in OBJECTS:
         oid = obj["id"]

@@ -45,7 +45,10 @@ def render_mfg(db, user):
     # Load all data in bulk (1 query each instead of N)
     all_status = db.get_all_status()
     active_blockers = db.get_blockers()
-    all_steps = db.get_all_steps()
+    try:
+        all_steps = db.get_all_steps()
+    except AttributeError:
+        all_steps = {obj["id"]: db.get_steps(obj["id"]) for obj in OBJECTS}
 
     objs = OBJECTS
     if owner_filter:
