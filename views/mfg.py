@@ -2,10 +2,11 @@
 
 import streamlit as st
 from datetime import datetime, timezone
-from data import OBJECTS, STEP_DEFS, MOCK1_RESULTS, MOCK2_ACTIONS, EXT_NUM_OBJECTS, PREREQ_OBJECTS
+from data import OBJECTS, STEP_DEFS, MOCK1_RESULTS, MOCK2_ACTIONS, EXT_NUM_OBJECTS, PREREQ_OBJECTS, OBJECT_OWNERS
 
 MOD_COLOR = {"PP": "#1A237E", "PP-PI": "#283593", "QM": "#004D40", "PM": "#BF360C"}
 MOD_BG    = {"PP": "#E8EAF6", "PP-PI": "#E8EAF6", "QM": "#E0F2F1", "PM": "#FBE9E7"}
+OWNER_COLOR = {"Miguel": "#1565C0", "Alyssa": "#2E7D32"}
 
 
 def now_iso():
@@ -25,21 +26,30 @@ def _shown_steps(obj_id):
 def render_mfg(db, user):
     st.subheader("⚙ MFG Workstream — PP · PP-PI · QM · PM")
 
-    # ── Filters ───────────────────────────────────────────────────────────────
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        mod_filter = st.multiselect("Module", ["PP", "PP-PI", "QM", "PM"], default=[])
-    with col2:
-        wave_filter = st.multiselect("Wave", sorted(set(o["wave"] for o in OBJECTS)), default=[])
-    with col3:
-        status_filter = st.multiselect("Status", ["Not Started", "In Progress", "Completed"], default=[])
-    with col4:
-        search = st.text_input("Search object", placeholder="name or DM-ID")
+    if "active_obj" not in st.session_state:
+        st.session_state.active_obj = None
 
+    # ── Filters ───────────────────────────────────────────────────────────────
+    col1, col2, col3, col4, col5 = st.columns(5)
+    with col1:
+        owner_filter = st.multiselect("Owner", ["Miguel", "Alyssa"], default=[])
+    with col2:
+        mod_filter = st.multiselect("Module", ["PP", "PP-PI", "QM", "PM"], default=[])
+    with col3:
+        wave_filter = st.multiselect("Wave", sorted(set(o["wave"] for o in OBJECTS)), default=[])
+    with col4:
+        status_filter = st.multiselect("Status", ["Not Started", "In Progress", "Completed"], default=[])
+    with col5:
+        search = st.text_input("Search", placeholder="name or DM-ID")
+
+    # Load all data in bulk (1 query each instead of N)
     all_status = db.get_all_status()
     active_blockers = db.get_blockers()
+    all_steps = db.get_all_steps()
 
     objs = OBJECTS
+    if owner_filter:
+        objs = [o for o in objs if OBJECT_OWNERS.get(o["id"], "—") in owner_filter]
     if mod_filter:
         objs = [o for o in objs if o["module"] in mod_filter]
     if wave_filter:
@@ -62,24 +72,27 @@ def render_mfg(db, user):
         oid = obj["id"]
         db_status = all_status.get(oid, {})
         obj_status = db_status.get("status", "Not Started")
-        steps = db.get_steps(oid)
+        steps = all_steps.get(oid, {})
         blocked = oid in active_blockers
         shown = _shown_steps(oid)
         done_count = sum(1 for s in shown if steps.get(s["key"], {}).get("status") == "done")
+        owner = OBJECT_OWNERS.get(oid, "—")
 
         status_icon = {"Not Started": "⬜", "In Progress": "🟡", "Completed": "✅"}.get(obj_status, "⬜")
         block_icon  = "🚨 " if blocked else ""
-        progress_label = f" [{done_count}/{len(shown)}]"
+        owner_color = OWNER_COLOR.get(owner, "#555")
+
+        is_expanded = st.session_state.active_obj == oid
 
         with st.expander(
-            f"{block_icon}{status_icon} **{oid}** — {obj['name']}{progress_label}  "
-            f"| {obj['module']} · {obj['wave']} · {obj['tool']}",
-            expanded=False,
+            f"{block_icon}{status_icon} **{oid}** — {obj['name']}  "
+            f"[{done_count}/{len(shown)}] · {owner} | {obj['module']} · {obj['wave']}",
+            expanded=is_expanded,
         ):
-            _render_object_detail(db, user, obj, db_status, steps, active_blockers, blocked, shown)
+            _render_object_detail(db, user, obj, db_status, steps, active_blockers, blocked, shown, owner, owner_color)
 
 
-def _render_object_detail(db, user, obj, db_status, steps, active_blockers, blocked, shown_steps):
+def _render_object_detail(db, user, obj, db_status, steps, active_blockers, blocked, shown_steps, owner, owner_color):
     oid = obj["id"]
     m1 = MOCK1_RESULTS.get(oid, {})
     actions = MOCK2_ACTIONS.get(oid, [])
@@ -88,7 +101,7 @@ def _render_object_detail(db, user, obj, db_status, steps, active_blockers, bloc
     done_count = sum(1 for s in shown_steps if steps.get(s["key"], {}).get("status") == "done")
     st.progress(
         done_count / len(shown_steps) if shown_steps else 0.0,
-        text=f"{done_count}/{len(shown_steps)} steps completed",
+        text=f"{done_count}/{len(shown_steps)} steps · Owner: **{owner}**",
     )
 
     # ── Top info row ───────────────────────────────────────────────────────────
@@ -98,7 +111,8 @@ def _render_object_detail(db, user, obj, db_status, steps, active_blockers, bloc
         ml = MOD_BG.get(obj["module"], "#f5f5f5")
         st.markdown(
             f'<span style="background:{ml};color:{mc};padding:3px 10px;'
-            f'border-radius:4px;font-weight:700">{obj["module"]}</span>',
+            f'border-radius:4px;font-weight:700">{obj["module"]}</span>'
+            f'&nbsp;&nbsp;<span style="color:{owner_color};font-weight:600">{owner}</span>',
             unsafe_allow_html=True,
         )
         st.caption(f"Tool: {obj['tool']}")
@@ -169,6 +183,7 @@ def _render_object_detail(db, user, obj, db_status, steps, active_blockers, bloc
                f"status={new_status} loaded={new_loaded} errors={new_errors}",
                user["name"])
         st.success("Saved!", icon="✅")
+        st.session_state.active_obj = oid
         st.rerun()
 
     # ── Blocker ────────────────────────────────────────────────────────────────
@@ -182,6 +197,7 @@ def _render_object_detail(db, user, obj, db_status, steps, active_blockers, bloc
             db.clear_blocker(blk["id"] if "id" in blk else oid, user["name"])
             db.log(oid, "blocker_cleared", blk["reason"], user["name"])
             st.success("Blocker cleared.")
+            st.session_state.active_obj = oid
             st.rerun()
     else:
         with st.expander("⚠️ Raise a blocker for this object", expanded=False):
@@ -194,11 +210,11 @@ def _render_object_detail(db, user, obj, db_status, steps, active_blockers, bloc
                     db.raise_blocker(oid, blk_reason, blk_owner, user["name"])
                     db.log(oid, "blocker_raised", blk_reason, user["name"])
                     st.warning("Blocker raised.")
+                    st.session_state.active_obj = oid
                     st.rerun()
 
     # ── Step checklist ─────────────────────────────────────────────────────────
     st.markdown("#### Execution Checklist")
-    st.caption(f"{done_count}/{len(shown_steps)} steps completed")
 
     for si, step in enumerate(shown_steps):
         sk = step["key"]
@@ -245,15 +261,18 @@ def _render_object_detail(db, user, obj, db_status, steps, active_blockers, bloc
             if not is_done and not is_running:
                 if st.button("▶ Start", key=f"start_{oid}_{sk}"):
                     _start_step(db, oid, sk, user["name"], db_status.get("status", "Not Started"))
+                    st.session_state.active_obj = oid
                     st.rerun()
             elif is_running:
                 if st.button("■ Stop", key=f"stop_{oid}_{sk}"):
                     _stop_step(db, oid, sk, user["name"], steps, shown_steps)
+                    st.session_state.active_obj = oid
                     st.rerun()
         with btn_cols[1]:
             if is_done or is_running:
                 if st.button("↺ Reset", key=f"reset_{oid}_{sk}"):
                     _reset_step(db, oid, sk, user["name"])
+                    st.session_state.active_obj = oid
                     st.rerun()
         with btn_cols[3]:
             new_note = st.text_input(

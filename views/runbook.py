@@ -122,10 +122,8 @@ def render_runbook(db, user):
     all_status = db.get_all_status()
     active_blockers = db.get_blockers()
 
-    # Build steps dict for all objects
-    all_steps = {}
-    for obj in OBJECTS:
-        all_steps[obj["id"]] = db.get_steps(obj["id"])
+    # Fetch all step states in one query
+    all_steps = db.get_all_steps()
 
     # Compute readiness
     readiness = {}

@@ -59,11 +59,12 @@ def render_schedule(db, user):
     st.markdown("### 📊 Load Sequence — Gantt View")
     st.caption("Bars show actual step timing when available, M1 planned schedule otherwise.")
 
+    all_steps = db.get_all_steps()
     gantt_rows = []
     for obj in OBJECTS:
         oid = obj["id"]
         sched = M1_SCHEDULE.get(oid, {})
-        steps = db.get_steps(oid)
+        steps = all_steps.get(oid, {})
 
         actual_start, actual_end = None, None
         has_running = False

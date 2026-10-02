@@ -17,13 +17,17 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ── Auto-refresh every 30 s ────────────────────────────────────────────────────
+# ── Auto-refresh (interval stored in session state so user can change it) ──────
 from streamlit_autorefresh import st_autorefresh
-st_autorefresh(interval=30_000, limit=None, key="autorefresh")
+REFRESH_OPTIONS = {"1 min": 60_000, "5 min": 300_000, "10 min": 600_000}
+if "refresh_interval_ms" not in st.session_state:
+    st.session_state.refresh_interval_ms = 300_000  # default 5 min
+st_autorefresh(interval=st.session_state.refresh_interval_ms, limit=None, key="autorefresh")
 
 # ── Team roster ────────────────────────────────────────────────────────────────
 TEAM = [
     ("Miguel",   "SI MFG Lead"),
+    ("Alyssa",   "AMS Migration"),
     ("Miah",     "AMS PP/QM/PM"),
     ("Rommel",   "Data Migration Lead"),
     ("Angelo",   "Basis/ABAP"),
@@ -73,19 +77,26 @@ with col1:
     st.caption(f"Logged in as **{user['name']}** · {user['role']}")
 with col2:
     st.caption("DMFI → DMFC · Go-Live: 2 Jan 2027")
-    hc1, hc2 = st.columns(2)
+    hc1, hc2, hc3 = st.columns(3)
     with hc1:
         if st.button("🔄 Refresh", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
     with hc2:
+        selected = st.selectbox(
+            "Auto-refresh", list(REFRESH_OPTIONS.keys()),
+            index=list(REFRESH_OPTIONS.values()).index(st.session_state.refresh_interval_ms),
+            key="refresh_picker", label_visibility="collapsed",
+        )
+        st.session_state.refresh_interval_ms = REFRESH_OPTIONS[selected]
+    with hc3:
         if st.button("🚪 Log out", use_container_width=True):
             st.session_state.user = None
             st.query_params.clear()
             st.rerun()
 
 st.caption(
-    f"Auto-refreshes every 30 s · Last: {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}"
+    f"Auto-refresh: {selected} · Last: {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}"
 )
 st.markdown("---")
 

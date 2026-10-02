@@ -94,13 +94,28 @@ class SupabaseDB:
             .order("updated_at", desc=True)
             .execute()
         )
-        # Latest record per step_key wins
         seen, steps = set(), {}
         for r in (res.data or []):
             if r["step_key"] not in seen:
                 steps[r["step_key"]] = r
                 seen.add(r["step_key"])
         return steps
+
+    def get_all_steps(self):
+        """Fetch latest step state for ALL objects in one query."""
+        res = (
+            self.sb.table("step_log")
+            .select("*")
+            .order("updated_at", desc=True)
+            .execute()
+        )
+        seen, result = set(), {}
+        for r in (res.data or []):
+            key = (r["obj_id"], r["step_key"])
+            if key not in seen:
+                result.setdefault(r["obj_id"], {})[r["step_key"]] = r
+                seen.add(key)
+        return result
 
     def upsert_step(self, obj_id, step_key, fields: dict, user_name: str):
         # Insert new row (audit trail — every change is a new row)
@@ -175,6 +190,9 @@ class LocalDB:
 
     def get_steps(self, obj_id):
         return self._steps.get(obj_id, {})
+
+    def get_all_steps(self):
+        return dict(self._steps)
 
     def upsert_step(self, obj_id, step_key, fields, user_name):
         self._steps.setdefault(obj_id, {})
@@ -362,3 +380,26 @@ OBJECTS = [
     {"id": "DM-078", "name": "Open Maintenance Notifications",    "module": "PM",    "wave": "W10","seq": 18, "tool": "LSMW",                "vol": 18444, "ext_num": True,  "prereq": True},
     {"id": "DM-077", "name": "Open Maintenance Orders",           "module": "PM",    "wave": "W10","seq": 19, "tool": "LSMW",                "vol": 2256,  "ext_num": True,  "prereq": True},
 ]
+
+# Owner assignment per schedule image
+OBJECT_OWNERS = {
+    "DM-055": "Miguel",   # Work Centers / Resources
+    "DM-025": "Miguel",   # Equipment Master
+    "DM-041": "Miguel",   # General Task Lists
+    "DM-073": "Miguel",   # Equipment Task Lists
+    "DM-074": "Miguel",   # FL Task Lists
+    "DM-037": "Miguel",   # Production BOM
+    "DM-083": "Miguel",   # Document BOM
+    "DM-039": "Miguel",   # Master Recipe
+    "DM-054": "Miguel",   # Maintenance Plan
+    "DM-071": "Miguel",   # Open Inspection Lots
+    "DM-076": "Miguel",   # Open Process Orders
+    "DM-077": "Miguel",   # Open Maintenance Orders
+    "DM-042": "Alyssa",   # Master Inspection Characteristics
+    "DM-018": "Alyssa",   # Functional Locations
+    "DM-040": "Alyssa",   # Equipment BOM
+    "DM-043": "Alyssa",   # Inspection Plan
+    "DM-038": "Alyssa",   # Production Version
+    "DM-070": "Alyssa",   # Open Quality Notifications
+    "DM-078": "Alyssa",   # Open Maintenance Notifications
+}
