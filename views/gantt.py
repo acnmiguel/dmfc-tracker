@@ -1,4 +1,4 @@
-"""views/gantt.py — Cutover schedule: Bar Gantt · Schedule Grid · Day Cards"""
+"""views/gantt.py — Cutover schedule: Schedule Grid · Day Cards"""
 
 import streamlit as st
 import plotly.graph_objects as go
@@ -32,9 +32,13 @@ PLAN = {
 TOTAL_DAYS = 8
 _OWNER_ORDER = ["Miguel", "Alyssa"]
 
-STATUS_BG  = {"done": "#C8E6C9", "running": "#FFF9C4", "planned": "#BBDEFB"}
-STATUS_FG  = {"done": "#1B5E20", "running": "#F57F17", "planned": "#0D47A1"}
-STATUS_BAR = {"done": "#66BB6A", "running": "#FFA726", "planned": "#64B5F6"}
+STATUS_BG    = {"done": "#C8E6C9", "running": "#FFF9C4", "planned": "#BBDEFB"}
+STATUS_FG    = {"done": "#1B5E20", "running": "#E65100", "planned": "#0D47A1"}
+STATUS_LABEL = {"done": "Done", "running": "In Progress", "planned": "Planned"}
+
+OWNER_BG     = {"Miguel": "#BBDEFB", "Alyssa": "#C8E6C9"}
+OWNER_FG     = {"Miguel": "#0D47A1", "Alyssa": "#1B5E20"}
+OWNER_BORDER = {"Miguel": "#1565C0", "Alyssa": "#2E7D32"}
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -75,7 +79,6 @@ def _get_actuals(db):
 
 
 def _day_active(plan_s, plan_e, d):
-    """True if object spanning (plan_s, plan_e) is active on integer day d (1-based)."""
     return plan_s < d + 0.5 and plan_e > d - 0.5
 
 
@@ -110,7 +113,7 @@ def _build_rows(obj_lookup, actuals, base, overlay):
 # ── Main render ────────────────────────────────────────────────────────────────
 
 def render_gantt(db):
-    c1, c2, c3 = st.columns([2, 5, 2])
+    c1, c2, c3 = st.columns([2, 4, 2])
     with c1:
         start_date = st.date_input(
             "Cutover Day 1", value=datetime(2027, 1, 2).date(), key="gantt_start"
@@ -118,7 +121,7 @@ def render_gantt(db):
     with c2:
         view = st.radio(
             "View",
-            ["📊 Bar Gantt", "📅 Schedule Grid", "🗓️ Day Cards"],
+            ["📅 Schedule Grid", "🗓️ Day Cards"],
             horizontal=True, key="gantt_view",
         )
     with c3:
@@ -132,73 +135,13 @@ def render_gantt(db):
     )
     rows = _build_rows(obj_lookup, actuals, base, overlay)
 
-    if view == "📊 Bar Gantt":
-        _render_bar_gantt(rows, base)
-    elif view == "📅 Schedule Grid":
+    if view == "📅 Schedule Grid":
         _render_grid(rows, base)
     else:
         _render_day_cards(rows, base)
 
 
-# ── View 1: Bar Gantt ──────────────────────────────────────────────────────────
-
-def _render_bar_gantt(rows, base):
-    labels, offsets, widths, colors, hovers = [], [], [], [], []
-
-    for owner in _OWNER_ORDER:
-        labels.append(f"── {owner} ──")
-        offsets.append(0); widths.append(0)
-        colors.append("rgba(0,0,0,0)"); hovers.append("")
-
-        for r in rows[owner]:
-            short = r["name"][:26] + ("…" if len(r["name"]) > 26 else "")
-            labels.append(f"  {r['oid']}  {short}")
-            offsets.append(max(0.0, r["bar_s"] - 1))
-            widths.append(max(0.08, r["bar_e"] - r["bar_s"]))
-            colors.append(STATUS_BAR.get(r["status"], "#64B5F6"))
-            hovers.append(
-                f"<b>{r['oid']}</b> — {r['name']}<br>"
-                f"Owner: {owner} · Module: {r['module']}<br>"
-                f"Planned: Day {r['plan_s']}–{r['plan_e']}<br>"
-                f"Status: <b>{r['status'].upper()}</b>"
-            )
-
-    fig_h = max(320, len(labels) * 34 + 60)
-
-    fig = go.Figure()
-    fig.add_trace(go.Bar(          # invisible offset
-        y=labels, x=offsets, orientation="h",
-        marker_color="rgba(0,0,0,0)",
-        hoverinfo="skip", showlegend=False,
-    ))
-    fig.add_trace(go.Bar(          # colored duration
-        y=labels, x=widths, orientation="h",
-        marker=dict(color=colors, line=dict(color="white", width=1)),
-        hovertext=hovers, hoverinfo="text",
-        showlegend=False,
-    ))
-    for s, c in STATUS_BAR.items():
-        fig.add_trace(go.Bar(y=[None], x=[None], orientation="h",
-                             marker_color=c, name=s.capitalize(), showlegend=True))
-
-    fig.update_layout(
-        barmode="stack", height=fig_h,
-        xaxis=dict(
-            tickmode="array",
-            tickvals=list(range(TOTAL_DAYS)),
-            ticktext=[f"Day {i+1}" for i in range(TOTAL_DAYS)],
-            range=[-0.3, TOTAL_DAYS + 0.3],
-            showgrid=True, gridcolor="#e0e0e0", zeroline=False,
-        ),
-        yaxis=dict(autorange="reversed", title="", tickfont_size=11),
-        plot_bgcolor="#f9f9f9",
-        margin=dict(t=10, b=10, l=5, r=90),
-        legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="right", x=1),
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-
-# ── View 2: Schedule Grid ──────────────────────────────────────────────────────
+# ── View 1: Schedule Grid ──────────────────────────────────────────────────────
 
 def _render_grid(rows, base):
     html = """
@@ -206,9 +149,9 @@ def _render_grid(rows, base):
 .sg { border-collapse:collapse; width:100%; font-family:sans-serif; font-size:11px }
 .sg th { background:#37474F; color:white; padding:6px 4px; text-align:center;
           border:1px solid #455A64; white-space:nowrap }
-.sg th.obj-col { text-align:left; min-width:170px }
-.sg td { padding:4px 3px; border:1px solid #e0e0e0; text-align:center }
-.sg td.obj-cell { text-align:left; padding:4px 8px; border-left-width:3px }
+.sg th.obj-col { text-align:left; min-width:200px }
+.sg td { padding:4px 5px; border:1px solid #e0e0e0; text-align:center; vertical-align:middle }
+.sg td.obj-cell { text-align:left; padding:4px 8px; border-left-width:3px; white-space:normal }
 .sg tr.owner-hdr td { background:#ECEFF1; font-weight:700; color:#37474F;
                        text-align:left; padding:5px 8px }
 </style>
@@ -226,20 +169,20 @@ def _render_grid(rows, base):
         html += f"<tr class='owner-hdr'><td colspan='{TOTAL_DAYS + 1}'>👤 {owner}</td></tr>"
         for r in rows[owner]:
             mc = MOD_COLORS.get(r["module"], "#607D8B")
-            name_s = r["name"][:28] + ("…" if len(r["name"]) > 28 else "")
             status = r["status"]
             bg = STATUS_BG.get(status, "#E3F2FD")
             fg = STATUS_FG.get(status, "#0D47A1")
-            icon = {"done": "✅", "running": "🟡", "planned": "▓"}.get(status, "")
+            label = STATUS_LABEL.get(status, status)
 
             html += (
                 f"<tr><td class='obj-cell' style='border-left-color:{mc}'>"
-                f"<b>{r['oid']}</b> {name_s}</td>"
+                f"<b>{r['oid']}</b> {r['name']}</td>"
             )
             for d in range(1, TOTAL_DAYS + 1):
                 if _day_active(r["plan_s"], r["plan_e"], d):
                     html += (
-                        f"<td style='background:{bg};color:{fg};font-size:13px'>{icon}</td>"
+                        f"<td style='background:{bg};color:{fg};"
+                        f"font-size:10px;font-weight:600'>{label}</td>"
                     )
                 else:
                     html += "<td></td>"
@@ -247,10 +190,10 @@ def _render_grid(rows, base):
 
     html += "</table></div>"
     st.markdown(html, unsafe_allow_html=True)
-    st.caption("▓ Planned · 🟡 Running · ✅ Done  |  Left border color = SAP module")
+    st.caption("Left border color = SAP module (PP / PP-PI / QM / PM)")
 
 
-# ── View 3: Day Cards ──────────────────────────────────────────────────────────
+# ── View 2: Day Cards ──────────────────────────────────────────────────────────
 
 def _render_day_cards(rows, base):
     day_objs = {d: [] for d in range(1, TOTAL_DAYS + 1)}
@@ -270,7 +213,6 @@ def _render_day_cards(rows, base):
             objs_today = day_objs[d]
 
             with cols[i]:
-                # Card header
                 st.markdown(
                     f"<div style='background:#37474F;color:white;padding:7px 10px;"
                     f"border-radius:6px 6px 0 0;font-weight:700;font-size:12px'>"
@@ -281,26 +223,30 @@ def _render_day_cards(rows, base):
                 if not objs_today:
                     st.markdown(
                         "<div style='padding:10px;color:#aaa;font-size:11px;"
-                        "border:1px solid #eee;border-top:none;border-radius:0 0 6px 6px'>"
-                        "No tasks</div>",
+                        "border:1px solid #eee;border-top:none;"
+                        "border-radius:0 0 6px 6px'>No tasks</div>",
                         unsafe_allow_html=True,
                     )
                     continue
 
                 items = ""
                 for r in objs_today:
-                    bg = STATUS_BG.get(r["status"], "#E3F2FD")
-                    fg = STATUS_FG.get(r["status"], "#0D47A1")
-                    mc = MOD_COLORS.get(r["module"], "#607D8B")
-                    o_dot = "🔵" if r["owner"] == "Miguel" else "🟢"
-                    icon = {"done": "✅", "running": "🟡", "planned": "⬜"}.get(r["status"], "⬜")
-                    name_s = r["name"][:22] + ("…" if len(r["name"]) > 22 else "")
+                    owner = r["owner"]
+                    obg = OWNER_BG.get(owner, "#F5F5F5")
+                    ofg = OWNER_FG.get(owner, "#333")
+                    obd = OWNER_BORDER.get(owner, "#888")
+                    status_label = STATUS_LABEL.get(r["status"], r["status"])
+                    status_fg = STATUS_FG.get(r["status"], "#555")
+
                     items += (
-                        f"<div style='padding:5px 7px;margin:3px 0;border-radius:4px;"
-                        f"background:{bg};border-left:3px solid {mc}'>"
-                        f"<span style='color:{fg};font-size:11px'>{icon} {o_dot} "
-                        f"<b>{r['oid']}</b></span><br>"
-                        f"<span style='color:#555;font-size:10px'>{name_s}</span>"
+                        f"<div style='padding:7px 10px;margin:3px 0;border-radius:4px;"
+                        f"background:{obg};border-left:4px solid {obd}'>"
+                        f"<div style='color:{ofg};font-weight:700;font-size:12px'>"
+                        f"{r['name']}</div>"
+                        f"<div style='color:#555;font-size:10px;margin-top:2px'>"
+                        f"{r['oid']} · "
+                        f"<span style='color:{status_fg};font-weight:600'>{status_label}</span>"
+                        f"</div>"
                         f"</div>"
                     )
 
@@ -310,4 +256,4 @@ def _render_day_cards(rows, base):
                     unsafe_allow_html=True,
                 )
 
-    st.caption("🔵 Miguel · 🟢 Alyssa &nbsp;|&nbsp; ⬜ Planned · 🟡 Running · ✅ Done")
+    st.caption("🔵 Blue = Miguel · 🟢 Green = Alyssa")
