@@ -117,7 +117,7 @@ def render_gantt(db):
 
     df = pd.DataFrame(rows)
     df["Owner"] = pd.Categorical(df["Owner"], _OWNER_ORDER)
-    df = df.sort_values(["Owner", "seq"])
+    df = df.sort_values(["Owner", "Start"], ascending=[True, True])
 
     fig = px.timeline(
         df,
